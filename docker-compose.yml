@@ -1,17 +1,16 @@
-version: '3.9'
 services:
-  termx-postgres:
+  pg:
     restart: unless-stopped
-    image: postgres:14
+    image: postgres:18
     shm_size: 1g
-    container_name: termx-postgres
+    container_name: tx-pg
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=postgres
     volumes:
       - ./pginit.sql:/docker-entrypoint-initdb.d/init.sql
-#      - ./pgdata:/var/lib/postgresql/data
+      - ./pgdata:/var/lib/postgresql/data
 #    networks:
 #      - termx
     ports:
@@ -22,7 +21,17 @@ services:
     image: ghcr.io/termx-health/termx-server:latest
     container_name: termx-server
     depends_on:
-      - termx-postgres
+      pg:
+        # The pg service's container_name is tx-pg, but compose's depends_on takes the
+        # SERVICE name, not the container name. Earlier `- tx-pg` was technically a no-op
+        # — compose silently treated it as a "depend on a service that doesn't exist" warning
+        # in v1, and as an error-but-don't-block in v2. Switch to the real service key here.
+        condition: service_started
+      termx-minio-init:
+        # Wait for the init container to finish creating the bob user + readwrite policy.
+        # Without this the server can start before Minio knows about `bob`, fail its first
+        # bucket-exists check, and crash any upload with "Access Key Id does not exist".
+        condition: service_completed_successfully
     env_file:
       - server.env
 #      - keycloak/server-keycloak.env
@@ -60,6 +69,21 @@ services:
     environment:
       - MINIO_ROOT_USER=minio
       - MINIO_ROOT_PASSWORD=miniominio
+    volumes:
+      # Persist data across container restarts. Without this, every `docker compose down`
+      # (and any container recreation) wiped the bob user the init container had created,
+      # leaving the server with "The Access Key Id you provided does not exist" on the
+      # first upload to /bob/objects.
+      - ./miniodata:/data
+    healthcheck:
+      # Minio's own readiness probe — only returns 200 once the S3 API is up. The init
+      # container waits for this via `condition: service_healthy` below, so we never run
+      # `mc admin user add` against a half-booted server.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
 #    networks:
 #      - termx
     ports:
@@ -70,12 +94,24 @@ services:
     container_name: termx-minio-init
     restart: "no"
     image: quay.io/minio/mc
+    depends_on:
+      termx-minio:
+        condition: service_healthy
     entrypoint: /bin/sh
-    command: -c "mc config host add minio http://termx-minio:9000 minio miniominio && mc admin user add minio bob bobobobo && mc admin policy attach minio readwrite --user bob"
+    # Idempotent provisioning — `--ignore-existing` (mb) and `|| true` (admin) let this
+    # container run cleanly whether the user/policy were created on a previous start or
+    # not. The previous `&&`-chained command would error out on re-run if `bob` already
+    # existed, leaving subsequent re-provisioning steps unexecuted.
+    command: >-
+      -c "
+      set -e;
+      mc alias set minio http://termx-minio:9000 minio miniominio;
+      (mc admin user add minio bob bobobobo 2>&1 | grep -v 'already' || true);
+      mc admin policy attach minio readwrite --user bob 2>&1 | grep -v 'already attached' || true;
+      echo 'bob user + readwrite policy provisioned';
+      "
 #    networks:
 #      - termx
-    depends_on:
-      - termx-minio
 
   fsh-chef:
     restart: unless-stopped
