@@ -4,6 +4,9 @@ snomed/data
 #db
 pgdata/
 
+#minio
+miniodata/
+
 # compiled output
 /dist
 /tmp
