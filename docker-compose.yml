@@ -61,14 +61,29 @@ services:
     ports:
       - 4200:80
 
+  # ---------------------------------------------------------------------------
+  # Minio credentials are taken from minio.env so the root password isn't hard-
+  # coded in this file and the init container can't drift out of sync with the
+  # Minio container.
+  #
+  # minio.env (committed with defaults; OVERRIDE PER DEPLOYMENT):
+  #   MINIO_ROOT_USER=minio
+  #   MINIO_ROOT_PASSWORD=miniominio        # <-- replace in production
+  #   BOB_MINIO_USER=bob                    # access key the server uses
+  #   BOB_MINIO_PASSWORD=bobobobo           # secret key the server uses
+  #
+  # When you change MINIO_ROOT_PASSWORD on a deployment, also update
+  # server.env's BOB_MINIO_SECRET_KEY only if you changed BOB_MINIO_PASSWORD.
+  # The root password is used by the init container to TALK to Minio; the
+  # server uses the per-app `bob` user, never the root user.
+  # ---------------------------------------------------------------------------
   termx-minio:
     restart: unless-stopped
     image: quay.io/minio/minio:latest
     container_name: termx-minio
     command: server /data --console-address ":9001"
-    environment:
-      - MINIO_ROOT_USER=minio
-      - MINIO_ROOT_PASSWORD=miniominio
+    env_file:
+      - minio.env
     volumes:
       # Persist data across container restarts. Without this, every `docker compose down`
       # (and any container recreation) wiped the bob user the init container had created,
@@ -94,21 +109,28 @@ services:
     container_name: termx-minio-init
     restart: "no"
     image: quay.io/minio/mc
+    env_file:
+      - minio.env
     depends_on:
       termx-minio:
         condition: service_healthy
     entrypoint: /bin/sh
-    # Idempotent provisioning — `--ignore-existing` (mb) and `|| true` (admin) let this
-    # container run cleanly whether the user/policy were created on a previous start or
-    # not. The previous `&&`-chained command would error out on re-run if `bob` already
-    # existed, leaving subsequent re-provisioning steps unexecuted.
+    # Idempotent provisioning — `|| true` on user/policy lets this container run cleanly
+    # whether the user/policy were created on a previous start or not. The previous
+    # `&&`-chained command would error out on re-run if `bob` already existed, leaving
+    # subsequent re-provisioning steps unexecuted.
+    #
+    # Reads MINIO_ROOT_USER / MINIO_ROOT_PASSWORD from minio.env so it MUST stay in sync
+    # with the Minio container's own credentials — single source of truth. Same goes for
+    # BOB_MINIO_USER / BOB_MINIO_PASSWORD (used both here for provisioning and by the
+    # server-side application in server.env's BOB_MINIO_ACCESS_KEY/SECRET_KEY).
     command: >-
       -c "
       set -e;
-      mc alias set minio http://termx-minio:9000 minio miniominio;
-      (mc admin user add minio bob bobobobo 2>&1 | grep -v 'already' || true);
-      mc admin policy attach minio readwrite --user bob 2>&1 | grep -v 'already attached' || true;
-      echo 'bob user + readwrite policy provisioned';
+      mc alias set minio http://termx-minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\";
+      (mc admin user add minio \"$$BOB_MINIO_USER\" \"$$BOB_MINIO_PASSWORD\" 2>&1 | grep -v 'already' || true);
+      mc admin policy attach minio readwrite --user \"$$BOB_MINIO_USER\" 2>&1 | grep -v 'already attached' || true;
+      echo \"bob ($$BOB_MINIO_USER) + readwrite policy provisioned\";
       "
 #    networks:
 #      - termx
