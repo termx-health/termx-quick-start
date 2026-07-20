@@ -4,17 +4,17 @@ The instructions here will help you set up the [Swagger UI](https://swagger.io) 
 
 ## Swagger config
 
-- Navigate to the TermX directory, open/create [`swagger-config.json`](swagger-config.json) and change `termx.mysite.com` url-s to your TermX server path. The content of `swagger-config.json` file should look like in the example below:
+- Navigate to the TermX directory and copy [`swagger-config.json`](swagger-config.json) there. No editing is needed — the definition URLs are host-relative, so the browser resolves them against whatever host you serve Swagger UI from:
 
 ```json
 {
   "urls": [
     {
-      "url": "https://termx.site.org/api/swagger/termx.yml",
+      "url": "/api/swagger/termx.yml",
       "name": "termx"
     },
     {
-      "url": "https://termx.site.org/api/fhir-swagger",
+      "url": "/api/fhir-swagger",
       "name": "termx-fhir"
     }
   ],
@@ -23,6 +23,9 @@ The instructions here will help you set up the [Swagger UI](https://swagger.io) 
   ]
 }
 ```
+
+> Use relative URLs rather than hardcoding your hostname. Absolute URLs pin the UI to one deployment, so a second environment sharing this config (or a copied-and-forgotten config) silently loads the *first* environment's API definitions — and "Try it out" then executes against the wrong server.
+> {.is-warning}
 
 # Nginx configuration
 
@@ -50,7 +53,7 @@ systemctl reload nginx
 cat swagger/swagger-docker-compose.yml >> docker-compose.yml
 ```
 
-- Copy [`swagger.env`](swagger.env) to TermX directory and change `termx.mysite.com` url to your TermX Swagger path.
+- Copy [`swagger.env`](swagger.env) to TermX directory. Its `CONFIG_URL` is relative too, so it needs no editing.
 
 ```bash
 cp swagger/swagger.env .
