@@ -1,11 +1,11 @@
 {
   "urls": [
     {
-      "url": "https://termx.mysite.com/api/swagger/termx.yml",
+      "url": "/api/swagger/termx.yml",
       "name": "termx"
     },
     {
-      "url": "https://termx.mysite.com/api/fhir-swagger",
+      "url": "/api/fhir-swagger",
       "name": "termx-fhir"
     }
   ],
