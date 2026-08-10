@@ -1,0 +1,25 @@
+# Override for the tedy-web frontend-test bring-up. Applied on top of
+# docker-compose.yml:  docker compose -f docker-compose.yml -f docker-compose.tedy-tests.yml up -d ...
+#
+# Two local-only fixes:
+#  1. server.env points DB_URL at host `termx-postgres`, but the pg service is
+#     named `pg` (container tx-pg). Add the alias so the server resolves it.
+#  2. minio's host ports 9100/9101 collide with the running `ssh termx-dev`
+#     tunnel (LocalForward 9100/9101). Drop the host mappings — the server talks
+#     to minio over the internal compose network (termx-minio:9000), so no host
+#     port is needed for the tests.
+services:
+  pg:
+    # postgres:18 rejects the legacy `./pgdata:/var/lib/postgresql/data` bind
+    # (PG18 stores data in a version subdir under /var/lib/postgresql). For an
+    # ephemeral test DB, drop the data bind entirely and keep only the init
+    # script; data lives in the container layer and is rebuilt on each `up`.
+    volumes: !override
+      - ./pginit.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      default:
+        aliases:
+          - termx-postgres
+
+  termx-minio:
+    ports: !override []

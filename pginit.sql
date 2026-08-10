@@ -9,3 +9,8 @@ set core.env  = 'dev';
 ALTER SYSTEM SET core.env = 'dev';
 select pg_reload_conf();
 
+-- hstore is required by termx migrations (matches scripts/recreate-db.sh). It
+-- must live in the `termx` database, so connect there before creating it.
+\connect termx
+CREATE EXTENSION IF NOT EXISTS hstore SCHEMA public;
+
